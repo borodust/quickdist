@@ -129,8 +129,20 @@ system-index-url: {base-url}/{name}/{version}/systems.txt
   (mapcar #'stringify list))
 
 
+(defun load-asd (asd-path)
+  (tagbody begin
+     (restart-case
+         (asdf:load-asd asd-path)
+       (retry-loading-asd () (go begin)))))
+
+
+(defun retry-loading-asd ()
+  (when-let ((restart (find-restart 'retry-loading-asd)))
+    (invoke-restart restart)))
+
+
 (defun get-systems (asd-path)
-  (asdf:load-asd asd-path)
+  (load-asd asd-path)
   (let ((project-name (pathname-name (fad:pathname-as-file asd-path))))
     (flet ((not-starts-with-name (system-name)
              (not (alexandria:starts-with-subseq project-name system-name)))

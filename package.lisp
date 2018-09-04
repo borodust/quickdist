@@ -10,4 +10,5 @@
            #:*dist-dir-template*
            #:*archive-dir-template*
            #:*archive-url-template*
-           #:*gnutar*))
+           #:*gnutar*
+           #:retry-loading-asd))
