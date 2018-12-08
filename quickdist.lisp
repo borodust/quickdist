@@ -59,7 +59,7 @@ system-index-url: {base-url}/{name}/{version}/systems.txt
   (let ((octets (babel-streams:with-output-to-sequence (buffer)
                   (external-program:run *gnutar* (list "-xOf" path) :output buffer))))
     (ironclad:byte-array-to-hex-string
-     (ironclad:digest-sequence :sha1 (copy-seq octets)))))
+     (ironclad:digest-sequence :sha1 octets))))
 
 (defun last-directory (path)
   (first (last (pathname-directory path))))
