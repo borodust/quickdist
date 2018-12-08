@@ -1,5 +1,10 @@
 (in-package #:quickdist)
 
+(defun shout (string &rest args)
+  (format t "~&~A" (apply #'format nil string args))
+  (finish-output t))
+
+
 (defparameter *distinfo-template*
   "name: {name}
 version: {version}
@@ -57,26 +62,22 @@ system-index-url: {base-url}/{name}/{version}/systems.txt
 
 (defun tar-content-sha1 (path)
   (let ((octets (babel-streams:with-output-to-sequence (buffer)
-                  (external-program:run *gnutar* (list "-xOf" path) :output buffer))))
+                  (inferior-shell:run (list *gnutar* "-xOf" (uiop:native-namestring path))
+                                      :output buffer))))
     (ironclad:byte-array-to-hex-string
      (ironclad:digest-sequence :sha1 octets))))
 
 (defun last-directory (path)
   (first (last (pathname-directory path))))
 
-(defun native-namestring (path)
-  #+ccl(ccl:native-translated-namestring path)
-  #+sbcl(sb-ext:native-namestring path)
-  #-(or ccl sbcl)(namestring path))
-
 (defun archive (destdir-path source-path)
   (let* ((mtime (format-date (effective-mtime source-path)))
          (name (format nil "~a-~a" (last-directory source-path) mtime))
          (out-path (make-pathname :name name :type "tgz" :defaults (truename destdir-path))))
-    (external-program:run *gnutar* (list "-C" (native-namestring source-path) "."
-                                           "-czf" (native-namestring out-path)
-                                           "--transform" (format nil "s#^.#~a#" name))
-                          :output *standard-output* :error *error-output*)
+    (inferior-shell:run (list *gnutar* "-C" (uiop:native-namestring source-path) "."
+                              "-czf" (uiop:native-namestring out-path)
+                              "--transform" (format nil "s#^.#~a#" name))
+                        :output *standard-output* :error-output *error-output*)
     out-path))
 
 
@@ -88,8 +89,8 @@ system-index-url: {base-url}/{name}/{version}/systems.txt
                                                      (read-file-into-string distignore-file)))
              (scanners (mapcar #'ppcre:create-scanner (mapcar #'trim-string regexes))))
         (lambda (string)
-          (let ((path (native-namestring path))
-                (string (native-namestring string)))
+          (let ((path (uiop:native-namestring path))
+                (string (uiop:native-namestring string)))
             (when (starts-with-subseq path string)
               (let ((subpath (enough-namestring string path)))
                 (loop for scanner in scanners
@@ -151,14 +152,13 @@ system-index-url: {base-url}/{name}/{version}/systems.txt
                                   (first (reverse dep))
                                   dep))))
       (sort (loop for system-name in (remove-if #'not-starts-with-name (asdf:registered-systems))
-               as system = (asdf:find-system system-name)
-               collect (list* (string-downcase (asdf:component-name system))
-                              (sort (mapcar #'parse-dependency
-                                            (nconc (asdf:system-defsystem-depends-on system)
-                                                   (asdf:system-depends-on system)))
-                                    #'string-lessp)))
-            #'string-lessp
-            :key #'first))))
+                  as system = (asdf:find-system system-name)
+                  collect (list* (string-downcase (asdf:component-name system))
+                                 (sort (mapcar #'parse-dependency
+                                               (append (asdf:system-defsystem-depends-on system)
+                                                       (asdf:system-depends-on system)))
+                                       #'string-lessp)))
+            #'string-lessp :key #'first))))
 
 
 (defun unix-filename (path)
@@ -166,8 +166,8 @@ system-index-url: {base-url}/{name}/{version}/systems.txt
 
 
 (defun unix-filename-relative-to (base path)
-  (let ((base-name (native-namestring (truename base)))
-        (path-name (native-namestring (truename path))))
+  (let ((base-name (uiop:native-namestring (truename base)))
+        (path-name (uiop:native-namestring (truename path))))
     (subseq path-name (mismatch base-name path-name))))
 
 
@@ -199,7 +199,7 @@ system-index-url: {base-url}/{name}/{version}/systems.txt
                   (let* ((tgz-path (archive archive-path project-path))
                          (project-prefix (pathname-name tgz-path))
                          (project-url (format nil "~a/~a" archive-url (unix-filename tgz-path))))
-                    (format *error-output* "Processing ~a...~%" project-name)
+                    (shout "Processing ~a" project-name)
                     (format release-index "~a ~a ~a ~a ~a ~a~{ ~a~}~%"
                             project-name project-url (file-size tgz-path)
                             (md5sum tgz-path) (tar-content-sha1 tgz-path) project-prefix
@@ -222,7 +222,7 @@ system-index-url: {base-url}/{name}/{version}/systems.txt
          (projects-path (fad:pathname-as-directory projects-dir))
          (template-data (list :name name :version version
                               :base-url (string-right-trim "/" base-url)
-                              :dists-dir (string-right-trim "/" (native-namestring dists-dir))))
+                              :dists-dir (string-right-trim "/" (uiop:native-namestring dists-dir))))
          (distinfo-path (fad:pathname-as-file (render-template *distinfo-file-template*
                                                                template-data)))
          (dist-path (fad:pathname-as-directory (render-template *dist-dir-template*
