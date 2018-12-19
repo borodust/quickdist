@@ -98,17 +98,19 @@ system-index-url: {base-url}/{name}/{version}/systems.txt
     (constantly nil)))
 
 
-(defun find-system-files (path black-list)
+(defun find-system-files (path globally-distignored-p black-list)
   (flet ((system-name->filename (name) (concatenate 'string name ".asd")))
     (let ((system-files nil)
           (blacklisted-filenames (mapcar #'system-name->filename black-list))
           (distignoredp (make-distignore-predicate path)))
-      (flet ((add-system-file (path) (push path system-files))
-
-             (asd-file-p (path) (and (string-equal "asd" (pathname-type path))
-                                     (not (find (file-namestring path) blacklisted-filenames
-                                                :test #'equalp))
-                                     (not (funcall distignoredp path)))))
+      (flet ((add-system-file (path)
+               (push path system-files))
+             (asd-file-p (path)
+               (and (string-equal "asd" (pathname-type path))
+                    (not (find (file-namestring path) blacklisted-filenames
+                               :test #'equalp))
+                    (not (funcall distignoredp path))
+                    (not (funcall globally-distignored-p path)))))
         (fad:walk-directory path #'add-system-file :test #'asd-file-p))
       (sort system-files #'string< :key #'pathname-name))))
 
@@ -188,33 +190,35 @@ system-index-url: {base-url}/{name}/{version}/systems.txt
     (with-open-file (system-index (make-pathname :name "systems" :type "txt" :defaults dist-path)
                                   :direction :output :if-exists :supersede)
       (write-line "# project system-file system-name [dependency1..dependencyN]" system-index)
-      (dolist (project-path (fad:list-directory projects-path))
-        (when (fad:directory-pathname-p project-path)
-          (let* ((project-name (last-directory project-path))
-                 (system-files (find-system-files project-path
-                                                  (blacklisted project-name black-alist))))
-            (if (not system-files)
-                (warn "No .asd files found in ~a, skipping." project-path)
-                (with-simple-restart (skip-project "Skip this project, continue with the next.")
-                  (let* ((tgz-path (archive archive-path project-path))
-                         (project-prefix (pathname-name tgz-path))
-                         (project-url (format nil "~a/~a" archive-url (unix-filename tgz-path))))
-                    (shout "Processing ~a" project-name)
-                    (format release-index "~a ~a ~a ~a ~a ~a~{ ~a~}~%"
-                            project-name project-url (file-size tgz-path)
-                            (md5sum tgz-path) (tar-content-sha1 tgz-path) project-prefix
-                            (mapcar (curry #'unix-filename-relative-to project-path)
-                                    system-files))
-                    (dolist (system-file system-files)
-                      (dolist (name-and-dependencies (get-systems system-file))
-                        (let ((*print-case* :downcase)
-                              (system-name (pathname-name system-file)))
-                          (unless (blacklistedp project-name system-name black-alist)
-                            (format system-index "~a ~a ~a~{ ~a~}~%"
-                                    project-name
-                                    system-name
-                                    (first name-and-dependencies)
-                                    (rest name-and-dependencies)))))))))))))))
+      (let ((globally-distignored-p (make-distignore-predicate projects-path)))
+        (dolist (project-path (fad:list-directory projects-path))
+          (when (fad:directory-pathname-p project-path)
+            (let* ((project-name (last-directory project-path))
+                   (system-files (find-system-files project-path
+                                                    globally-distignored-p
+                                                    (blacklisted project-name black-alist))))
+              (if (not system-files)
+                  (warn "No .asd files found in ~a, skipping." project-path)
+                  (with-simple-restart (skip-project "Skip this project, continue with the next.")
+                    (let* ((tgz-path (archive archive-path project-path))
+                           (project-prefix (pathname-name tgz-path))
+                           (project-url (format nil "~a/~a" archive-url (unix-filename tgz-path))))
+                      (shout "Processing ~a" project-name)
+                      (format release-index "~a ~a ~a ~a ~a ~a~{ ~a~}~%"
+                              project-name project-url (file-size tgz-path)
+                              (md5sum tgz-path) (tar-content-sha1 tgz-path) project-prefix
+                              (mapcar (curry #'unix-filename-relative-to project-path)
+                                      system-files))
+                      (dolist (system-file system-files)
+                        (dolist (name-and-dependencies (get-systems system-file))
+                          (let ((*print-case* :downcase)
+                                (system-name (pathname-name system-file)))
+                            (unless (blacklistedp project-name system-name black-alist)
+                              (format system-index "~a ~a ~a~{ ~a~}~%"
+                                      project-name
+                                      system-name
+                                      (first name-and-dependencies)
+                                      (rest name-and-dependencies))))))))))))))))
 
 
 (defun quickdist (&key name (version :today) base-url projects-dir dists-dir black-alist)
