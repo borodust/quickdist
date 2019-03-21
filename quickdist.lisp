@@ -61,9 +61,13 @@ system-index-url: {base-url}/{name}/{version}/systems.txt
    (ironclad:digest-file :md5 path)))
 
 (defun tar-content-sha1 (path)
-  (let ((octets (babel-streams:with-output-to-sequence (buffer)
-                  (inferior-shell:run (list *gnutar* "-xOf" (uiop:native-namestring path))
-                                      :output buffer))))
+  (let ((octets (uiop:with-temporary-file (:pathname pathname)
+                  (inferior-shell:run `(inferior-shell:pipe
+                                        (,*gnutar* "-xOf"
+                                                   ,(uiop:native-namestring path))
+                                        ("echo" inferior-shell:>
+                                                ,(uiop:native-namestring pathname))))
+                  (alexandria:read-file-into-byte-vector pathname))))
     (ironclad:byte-array-to-hex-string
      (ironclad:digest-sequence :sha1 octets))))
 
