@@ -187,6 +187,12 @@ system-index-url: {base-url}/{name}/{version}/systems.txt
   (find (stringify system-name) (blacklisted project-name black-alist)))
 
 
+(defmacro for-each-project ((project-path) root-path &body body)
+  `(dolist (,project-path (fad:list-directory ,root-path))
+     (when (fad:directory-pathname-p ,project-path)
+       ,@body)))
+
+
 (defun create-dist (projects-path dist-path archive-path archive-url black-alist)
   (with-open-file (release-index (make-pathname :name "releases" :type "txt" :defaults dist-path)
                                  :direction :output :if-exists :supersede)
