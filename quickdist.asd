@@ -3,9 +3,9 @@
   :author "Orivej Desh <orivej@gmx.fr>, Pavel Korolev <dev@borodust.org"
   :mailto "dev@borodust.org"
   :licence "Unlicense <http://unlicense.org/UNLICENSE>"
-  :depends-on (:alexandria :cl-fad
+  :depends-on (:alexandria :uiop :cl-fad
                :babel-streams :inferior-shell :ironclad :cl-ppcre
-               :quicklisp :split-sequence :cl-mustache)
+               :split-sequence :cl-mustache)
 
   :pathname "src/"
   :serial t

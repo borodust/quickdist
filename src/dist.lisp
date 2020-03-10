@@ -4,9 +4,9 @@
 ;;; RELEASE DESCRIPTOR
 ;;;
 (defclass release-descriptor ()
-  ((name :initarg :name)
-   (last-modified :initarg :last-modified)
-   (system-files :initarg :system-files)))
+  ((name :initarg :name :reader %name-of )
+   (last-modified :initarg :last-modified :reader %last-modified-of)
+   (system-files :initarg :system-files :reader %system-files-of)))
 
 
 (defun make-release-descriptor (name last-modified system-files)
@@ -26,10 +26,10 @@
 ;;; SYSTEM DESCRIPTOR
 ;;;
 (defclass system-descriptor ()
-  ((name :initarg :name)
-   (project :initarg :project)
-   (file :initarg :file)
-   (dependencies :initarg :dependencies)))
+  ((name :initarg :name :reader %name-of)
+   (project :initarg :project :reader %project-of)
+   (file :initarg :file :reader %file-of)
+   (dependencies :initarg :dependencies :reader %dependencies-of)))
 
 
 (defun make-system-descriptor (project-name system-file system-name system-dependencies)
@@ -48,14 +48,31 @@
 
 
 ;;;
+;;; ARCHIVE DESCRIPTOR
+;;;
+(defclass archive-descriptor ()
+  ((project :initarg :project :reader %project-of)
+   (name :initarg :name :reader %name-of)
+   (file-md5 :initarg :md5 :reader %file-md5-of)
+   (content-sha1 :initarg :sha1 :reader %content-sha1-of)
+   (size :initarg :size :reader %size-of)))
+
+
+(defun make-archive (project name file-md5 content-sha1 size)
+  (make-instance 'archive-descriptor :project project
+                                     :name name
+                                     :md5 file-md5
+                                     :sha1 content-sha1
+                                     :size size))
+;;;
 ;;; DIST
 ;;;
 (defclass dist ()
   ((name :initarg :name :reader %name-of)
    (version :initarg :version :reader %version-of)
    (base-url :initarg :base-url :reader %base-url-of)
-   (release-index :initarg :release-index)
-   (system-index :initarg :system-index)))
+   (release-index :initarg :release-index :reader %release-index-of)
+   (system-index :initarg :system-index :reader %system-index-of)))
 
 
 (defmethod serialize ((this dist))
@@ -113,7 +130,7 @@
 
 (defun make-dist-from-directory (name base-url project-path)
   (let* ((project-path (fad:pathname-as-directory project-path))
-         (global-distignore (make-distignore-predicate project-path))
+         (global-distignore (read-distignore-predicate project-path))
          (release-index (make-hash-table :test 'equal))
          (system-index (make-hash-table :test 'equal)))
     (dolist (release-path (fad:list-directory project-path))
@@ -152,33 +169,94 @@
 ;; METADATA
 
 (defun merge-dist-subscription-distinfo-filename (dist base-path)
-  (fad:merge-pathnames-as-file (fad:pathname-as-directory base-path)
-                               (format nil "~A.txt" (%name-of dist))))
+  (file base-path (format nil "~A.txt" (%name-of dist))))
 
 
-(defun merge-distinfo-filename (dist base-path)
-  (fad:merge-pathnames-as-file (fad:pathname-as-directory base-path)
-                               (format nil "~A.txt" (%name-of dist))))
+(defun merge-distinfo-filename (dist base-path &optional name-override)
+  (file base-path (format nil "~A.txt" (if name-override
+                                           name-override
+                                           (%name-of dist)))))
 
 
 (defun merge-dist-version-directory (dist base-path)
-  (fad:merge-pathnames-as-directory (fad:pathname-as-directory base-path)
-                                    (%name-of dist)
-                                    (%version-of dist)))
+  (dir base-path (%name-of dist) (%version-of dist)))
+
 
 (defun merge-dist-archive-directory (dist base-path)
-  (fad:merge-pathnames-as-directory (fad:pathname-as-directory base-path)
-                                    (%name-of dist)
-                                    "archive"))
+  (dir base-path (%name-of dist) "archive"))
 
 
-(defun dist-archive-url (dist)
-  (format nil "~A/~A/archive" (%base-url-of dist) (%name-of dist)))
+(defun dist-archive-url (dist archive-file)
+  (format nil "~A/~A/archive/~A" (%base-url-of dist) (%name-of dist) archive-file))
 
 
-(defun render-subscription-distinfo (dist base-path)
+(defun render-distinfo (dist base-path &optional name-override)
   (alexandria:write-string-into-file
    (render-distinfo-template (%name-of dist) (%version-of dist) (%base-url-of dist))
-   (merge-distinfo-filename dist base-path)))
+   (merge-distinfo-filename dist base-path name-override))
+  (values))
+
+
+(defun render-releases (dist archive-index base-path)
+  (flet ((get-archive (project)
+           (if-let ((archive (gethash project archive-index)))
+             archive
+             (error "Archive for ~A missing" project))))
+    (let ((data (loop for key being the hash-key of (%release-index-of dist) using (hash-value value)
+                      for archive = (get-archive (%name-of value))
+                      collect `((:name . ,(%name-of value))
+                                (:url . "")
+                                (:archive-size . ,(%size-of archive))
+                                (:archive-file-md5 . ,(%file-md5-of archive))
+                                (:archive-content-sha1 . ,(%content-sha1-of archive))
+                                (:archive . ,(%name-of archive))
+                                (:system-files . ,(apply #'join-strings " " (%system-files-of value))))))
+          (archive-dir (merge-dist-archive-directory dist base-path)))
+      (ensure-directories-exist archive-dir)
+      (alexandria:write-string-into-file
+       (render-releases-template data)
+       (file archive-dir "releases.txt"))))
+  (values))
+
+
+(defun render-systems (dist base-path)
+  (let ((data (loop for key being the hash-key of (%system-index-of dist) using (hash-value value)
+                    collect `((:project . ,(%project-of value))
+                              (:file . ,(%file-of value))
+                              (:name . ,(%name-of value))
+                              (:dependencies . ,(apply #'join-strings " " (%dependencies-of value))))))
+        (archive-dir (merge-dist-archive-directory dist base-path)))
+    (ensure-directories-exist archive-dir)
+    (alexandria:write-string-into-file
+     (render-systems-template data)
+     (file archive-dir "systems.txt")))
+  (values))
+
+
+(defun prepare-archive (release-path target-dir)
+  (let* ((project-name (last-directory-component release-path))
+         (archive-path (archive target-dir release-path))
+         (archive-name (pathname-name archive-path))
+         (file-size (file-size archive-path))
+         (md5 (md5sum archive-path))
+         (sha1 (tar-content-sha1 archive-path)))
+    (make-archive project-name archive-name md5 sha1 file-size)))
+
+
+(defun prepare-archives (dist project-dir target-dir)
+(loop with archive-index = (make-hash-table :test 'equal)
+      for name being the hash-key of (%release-index-of dist)
+      for archive = (prepare-archive (dir project-dir name) target-dir)
+      do (setf (gethash name archive-index) archive)
+      finally (return archive-index)))
+
+
+(defun package-dist (dist project-dir)
+  (with-temporary-directory (tmp-dir)
+    (let ((archive-index (prepare-archives dist project-dir tmp-dir)))
+      (render-distinfo dist tmp-dir)
+      (render-releases dist archive-index tmp-dir)
+      (render-systems dist tmp-dir))
+    (break "~A" tmp-dir)))
 
 ;; ARCHIVES

@@ -1,0 +1,4 @@
+# project url size file-md5 content-sha1 prefix [system-file1..system-fileN]
+{{#releases}}
+{{name}} {{url}} {{archive-size}} {{archive-file-md5}} {{archive-content-sha1}} {{archive}} {{system-files}}
+{{/releases}}

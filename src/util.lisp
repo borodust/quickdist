@@ -3,6 +3,10 @@
 ;;;
 ;;; GENERAL
 ;;;
+(defun join-strings (separator &rest strings)
+  (format nil (concatenate 'string "~{~A~^" separator "~}") strings))
+
+
 (defun effective-mtime (path)
   (if (not (fad:directory-pathname-p path))
       (file-write-date path)
@@ -16,14 +20,6 @@
 
 (defun last-directory-component (path)
   (first (last (pathname-directory path))))
-
-
-(defun stringify (value)
-  (format nil "~(~A~)" value))
-
-
-(defun stringify-list (list)
-  (mapcar #'stringify list))
 
 
 (defun unix-filename (path)
@@ -40,6 +36,31 @@
   (let* ((time (multiple-value-list (decode-universal-time universal-time)))
          (timestamp (reverse (subseq time 0 6))))
     (format nil "~{~2,'0d~}" timestamp)))
+
+
+(defmacro with-temporary-directory ((path) &body body)
+  `(let ((,path (fad:pathname-as-directory (uiop:with-temporary-file (:pathname path) path))))
+     (ensure-directories-exist ,path)
+     (unwind-protect
+          (progn ,@body)
+       (fad:delete-directory-and-files ,path))))
+
+
+(defun file-size (path)
+  (with-open-file (stream path :element-type '(unsigned-byte 8))
+    (file-length stream)))
+
+
+(defun file (&rest pathnames)
+  (apply #'fad:merge-pathnames-as-file (loop for (path . rest) on pathnames
+                                             collect (if rest
+                                                         (fad:pathname-as-directory path)
+                                                         (fad:pathname-as-file path)))))
+
+
+(defun dir (&rest pathnames)
+  (apply #'fad:merge-pathnames-as-directory (mapcar #'uiop:ensure-directory-pathname pathnames)))
+
 ;;;
 ;;; ARCHIVES
 ;;;
@@ -61,7 +82,7 @@
 
 (defun archive (destdir-path source-path)
   (let* ((mtime (format-date (effective-mtime source-path)))
-         (name (format nil "~a-~a" (last-directory source-path) mtime))
+         (name (format nil "~a-~a" (last-directory-component source-path) mtime))
          (out-path (make-pathname :name name :type "tgz" :defaults (truename destdir-path))))
     (inferior-shell:run (list *gnutar* "-C" (uiop:native-namestring source-path) "."
                               "-czf" (uiop:native-namestring out-path)
@@ -74,7 +95,7 @@
 ;;; DISTIGNORE
 ;;;
 (defun read-distignore-predicate (path)
-  (if-let ((distignore-file (probe-file (fad:merge-pathnames-as-file path ".distignore"))))
+  (if-let ((distignore-file (probe-file (file path ".distignore"))))
     (flet ((trim-string (string)
              (string-trim '(#\Tab #\Space #\Newline) string)))
       (let* ((regexes (split-sequence:split-sequence #\Newline
@@ -100,7 +121,7 @@
   (flet ((system-name->filename (name) (concatenate 'string name ".asd")))
     (let ((system-files nil)
           (blacklisted-filenames (mapcar #'system-name->filename black-alist))
-          (distignore (make-distignore-predicate path)))
+          (distignore (read-distignore-predicate path)))
       (flet ((add-system-file (path)
                (push path system-files))
              (asd-file-p (path)

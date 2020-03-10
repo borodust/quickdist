@@ -1,5 +1,5 @@
 (cl:defpackage #:quickdist
-  (:use :cl)
+  (:use :cl :alexandria)
   (:export #:*gnutar*
            #:retry-loading-asd
 
