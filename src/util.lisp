@@ -69,8 +69,10 @@
                                                (mapcar #'ensure-relative-dir pathnames)))))
 
 
-(defun cp (src dst)
-  (inferior-shell:run/nil `("cp" "-f" ,(uiop:native-namestring src) ,(uiop:native-namestring dst))))
+(defun cp (src dst &key recursive)
+  (inferior-shell:run/nil `("cp" ,@(when recursive
+                                     (list "-R"))
+                                 "-f" ,(uiop:native-namestring src) ,(uiop:native-namestring dst))))
 
 
 (defun copy-directory-if (predicate src dst)
