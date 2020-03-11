@@ -128,7 +128,7 @@
         (setf (gethash (list project-name system-name) index) system)))))
 
 
-(defun make-dist-from-directory (name base-url project-path)
+(defun make-dist-from-directory (name base-url project-path &key version)
   (let* ((project-path (fad:pathname-as-directory project-path))
          (global-distignore (read-distignore-predicate project-path))
          (release-index (make-hash-table :test 'equal))
@@ -145,7 +145,9 @@
                                 system-files)
               (register-systems system-index project-name system-files))))))
     (make-dist name base-url
-               :version (format-date (effective-mtime project-path))
+               :version (if (or (null version) (eq version :latest))
+                            (format-date (effective-mtime project-path))
+                            (format nil "~A" version))
                :release-index release-index
                :system-index system-index)))
 
@@ -167,15 +169,8 @@
 
 
 ;; METADATA
-
-(defun merge-dist-subscription-distinfo-filename (dist base-path)
+(defun merge-distinfo-filename (dist base-path)
   (file base-path (format nil "~A.txt" (%name-of dist))))
-
-
-(defun merge-distinfo-filename (dist base-path &optional name-override)
-  (file base-path (format nil "~A.txt" (if name-override
-                                           name-override
-                                           (%name-of dist)))))
 
 
 (defun merge-dist-version-directory (dist base-path)
@@ -186,15 +181,27 @@
   (dir base-path (%name-of dist) "archive"))
 
 
-(defun dist-archive-url (dist archive-file)
-  (format nil "~A/~A/archive/~A" (%base-url-of dist) (%name-of dist) archive-file))
+(defun dist-archive-url (dist archive-name)
+  (format nil "~A/~A/archive/~A.tgz" (%base-url-of dist) (%name-of dist) archive-name))
 
 
-(defun render-distinfo (dist base-path &optional name-override)
+(defun %render-distinfo (dist target-file)
   (alexandria:write-string-into-file
    (render-distinfo-template (%name-of dist) (%version-of dist) (%base-url-of dist))
-   (merge-distinfo-filename dist base-path name-override))
+   target-file)
   (values))
+
+
+(defun render-distinfo (dist base-path)
+  (let ((target-file (file (merge-dist-version-directory dist base-path) "distinfo.txt")))
+    (ensure-directories-exist (fad:pathname-directory-pathname target-file))
+    (%render-distinfo dist target-file)))
+
+
+(defun render-subscription (dist base-path)
+  (let ((target-file (merge-distinfo-filename dist base-path)))
+    (ensure-directories-exist (fad:pathname-directory-pathname target-file))
+    (%render-distinfo dist target-file)))
 
 
 (defun render-releases (dist archive-index base-path)
@@ -205,17 +212,17 @@
     (let ((data (loop for key being the hash-key of (%release-index-of dist) using (hash-value value)
                       for archive = (get-archive (%name-of value))
                       collect `((:name . ,(%name-of value))
-                                (:url . "")
+                                (:url . ,(dist-archive-url dist (%name-of archive)))
                                 (:archive-size . ,(%size-of archive))
                                 (:archive-file-md5 . ,(%file-md5-of archive))
                                 (:archive-content-sha1 . ,(%content-sha1-of archive))
                                 (:archive . ,(%name-of archive))
                                 (:system-files . ,(apply #'join-strings " " (%system-files-of value))))))
-          (archive-dir (merge-dist-archive-directory dist base-path)))
-      (ensure-directories-exist archive-dir)
+          (version-dir (merge-dist-version-directory dist base-path)))
+      (ensure-directories-exist version-dir)
       (alexandria:write-string-into-file
        (render-releases-template data)
-       (file archive-dir "releases.txt"))))
+       (file version-dir "releases.txt"))))
   (values))
 
 
@@ -225,11 +232,11 @@
                               (:file . ,(%file-of value))
                               (:name . ,(%name-of value))
                               (:dependencies . ,(apply #'join-strings " " (%dependencies-of value))))))
-        (archive-dir (merge-dist-archive-directory dist base-path)))
-    (ensure-directories-exist archive-dir)
+        (version-dir (merge-dist-version-directory dist base-path)))
+    (ensure-directories-exist version-dir)
     (alexandria:write-string-into-file
      (render-systems-template data)
-     (file archive-dir "systems.txt")))
+     (file version-dir "systems.txt")))
   (values))
 
 
@@ -243,20 +250,32 @@
     (make-archive project-name archive-name md5 sha1 file-size)))
 
 
-(defun prepare-archives (dist project-dir target-dir)
-  (loop with archive-index = (make-hash-table :test 'equal)
-        for name being the hash-key of (%release-index-of dist)
-        for archive = (prepare-archive (dir project-dir name) target-dir)
-        do (setf (gethash name archive-index) archive)
-        finally (return archive-index)))
+(defun prepare-archives (dist project-dir base-path)
+  (let ((target-dir (merge-dist-archive-directory dist base-path)))
+    (ensure-directories-exist target-dir)
+    (loop with archive-index = (make-hash-table :test 'equal)
+          for name being the hash-key of (%release-index-of dist)
+          for archive = (prepare-archive (dir project-dir name) target-dir)
+          do (setf (gethash name archive-index) archive)
+          finally (return archive-index))))
 
 
-(defun package-dist (dist project-dir)
+(defun package-dist (dist project-dir dist-dir)
   (with-temporary-directory (tmp-dir)
-    (let ((archive-index (prepare-archives dist project-dir tmp-dir)))
+    (let* ((archive-index (prepare-archives dist project-dir tmp-dir)))
+      (render-subscription dist tmp-dir)
       (render-distinfo dist tmp-dir)
       (render-releases dist archive-index tmp-dir)
       (render-systems dist tmp-dir))
-    (break "~A" tmp-dir)))
+    (ensure-directories-exist (dir dist-dir))
+    (cp tmp-dir dist-dir :recursive t)))
 
-;; ARCHIVES
+;;;
+;;; QUICKDIST COMPAT
+;;;
+(defun quickdist (&key (name "dist") (version :latest) (base-url "http://localhost/")
+                    projects-dir dists-dir)
+  (assert projects-dir)
+  (let* ((dists-dir (or dists-dir (dir projects-dir "dist")))
+         (dist (make-dist-from-directory name base-url projects-dir :version version)))
+    (package-dist dist projects-dir dists-dir)))
