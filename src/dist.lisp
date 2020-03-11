@@ -244,11 +244,11 @@
 
 
 (defun prepare-archives (dist project-dir target-dir)
-(loop with archive-index = (make-hash-table :test 'equal)
-      for name being the hash-key of (%release-index-of dist)
-      for archive = (prepare-archive (dir project-dir name) target-dir)
-      do (setf (gethash name archive-index) archive)
-      finally (return archive-index)))
+  (loop with archive-index = (make-hash-table :test 'equal)
+        for name being the hash-key of (%release-index-of dist)
+        for archive = (prepare-archive (dir project-dir name) target-dir)
+        do (setf (gethash name archive-index) archive)
+        finally (return archive-index)))
 
 
 (defun package-dist (dist project-dir)

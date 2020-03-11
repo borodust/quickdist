@@ -51,15 +51,39 @@
     (file-length stream)))
 
 
-(defun file (&rest pathnames)
-  (apply #'fad:merge-pathnames-as-file (loop for (path . rest) on pathnames
-                                             collect (if rest
-                                                         (fad:pathname-as-directory path)
-                                                         (fad:pathname-as-file path)))))
+(defun file (base &rest pathnames)
+  (apply #'fad:merge-pathnames-as-file (append
+                                        (list (uiop:ensure-directory-pathname base))
+                                        (loop for (path . rest) on pathnames
+                                              for relative = (uiop:enough-pathname path "/")
+                                              collect (if rest
+                                                          (uiop:ensure-directory-pathname relative)
+                                                          (fad:pathname-as-file relative))))))
 
 
-(defun dir (&rest pathnames)
-  (apply #'fad:merge-pathnames-as-directory (mapcar #'uiop:ensure-directory-pathname pathnames)))
+(defun dir (base &rest pathnames)
+  (flet ((ensure-relative-dir (dir)
+           (uiop:ensure-directory-pathname (uiop:enough-pathname dir "/"))))
+    (apply #'fad:merge-pathnames-as-directory (append
+                                               (list (uiop:ensure-directory-pathname base))
+                                               (mapcar #'ensure-relative-dir pathnames)))))
+
+
+(defun cp (src dst)
+  (inferior-shell:run/nil `("cp" "-f" ,(uiop:native-namestring src) ,(uiop:native-namestring dst))))
+
+
+(defun copy-directory-if (predicate src dst)
+  (let ((dst (dir dst)))
+    (ensure-directories-exist dst)
+    (flet ((%cp (src-path)
+             (let* ((relative (uiop:enough-pathname (uiop:native-namestring src-path)
+                                                    (uiop:native-namestring src))))
+               (ensure-directories-exist (fad:pathname-directory-pathname
+                                          (merge-pathnames relative dst)))
+               (unless (fad:directory-pathname-p relative)
+                 (cp src-path (file dst relative))))))
+      (fad:walk-directory src #'%cp :directories :depth-first :test predicate :follow-symlinks nil))))
 
 ;;;
 ;;; ARCHIVES
@@ -81,13 +105,16 @@
 
 
 (defun archive (destdir-path source-path)
-  (let* ((mtime (format-date (effective-mtime source-path)))
+  (let* ((distignore (read-distignore-predicate source-path))
+         (mtime (format-date (effective-mtime source-path)))
          (name (format nil "~a-~a" (last-directory-component source-path) mtime))
          (out-path (make-pathname :name name :type "tgz" :defaults (truename destdir-path))))
-    (inferior-shell:run (list *gnutar* "-C" (uiop:native-namestring source-path) "."
-                              "-czf" (uiop:native-namestring out-path)
-                              "--transform" (format nil "s#^.#~a#" name))
-                        :output *standard-output* :error-output *error-output*)
+    (with-temporary-directory (tmp-source-path)
+      (copy-directory-if (complement distignore) source-path tmp-source-path)
+      (inferior-shell:run (list *gnutar* "-C" (uiop:native-namestring tmp-source-path) "."
+                                "-czf" (uiop:native-namestring out-path)
+                                "--transform" (format nil "s#^.#~a#" name))
+                          :output *standard-output* :error-output *error-output*))
     out-path))
 
 
