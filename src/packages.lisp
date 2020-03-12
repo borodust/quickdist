@@ -3,6 +3,9 @@
   (:export #:*gnutar*
            #:retry-loading-asd
 
-           #:generate-metadata
-           #:generate-archives
+           #:save-dist
+           #:load-dist
+
+           #:make-dist-from-directory
+           #:package-dist
            #:quickdist))

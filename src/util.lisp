@@ -132,10 +132,13 @@
 (defun read-distignore-predicate (path)
   (if-let ((distignore-file (probe-file (file path ".distignore"))))
     (flet ((trim-string (string)
-             (string-trim '(#\Tab #\Space #\Newline) string)))
+             (string-trim '(#\Tab #\Space #\Newline) string))
+           (comment-or-empty-p (string)
+             (or (emptyp string) (starts-with "#" string))))
       (let* ((regexes (split-sequence:split-sequence #\Newline
                                                      (read-file-into-string distignore-file)))
-             (scanners (mapcar #'ppcre:create-scanner (mapcar #'trim-string regexes))))
+             (scanners (mapcar #'ppcre:create-scanner (remove-if #'comment-or-empty-p
+                                                                 (mapcar #'trim-string regexes)))))
         (lambda (string)
           (let ((path (uiop:native-namestring path))
                 (string (uiop:native-namestring string)))
