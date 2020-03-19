@@ -231,7 +231,10 @@
                     collect `((:project . ,(%project-of value))
                               (:file . ,(%file-of value))
                               (:name . ,(%name-of value))
-                              (:dependencies . ,(apply #'join-strings " " (%dependencies-of value))))))
+                              (:dependencies . ,(if-let ((deps (%dependencies-of value)))
+                                                  (format nil " ~A"
+                                                          (apply #'join-strings " " deps))
+                                                  "")))))
         (version-dir (merge-dist-version-directory dist base-path)))
     (ensure-directories-exist version-dir)
     (alexandria:write-string-into-file
