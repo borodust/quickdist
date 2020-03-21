@@ -4,7 +4,7 @@
 ;;; RELEASE DESCRIPTOR
 ;;;
 (defclass release-descriptor ()
-  ((name :initarg :name :reader %name-of )
+  ((name :initarg :name :reader %name-of)
    (last-modified :initarg :last-modified :reader %last-modified-of)
    (system-files :initarg :system-files :reader %system-files-of)))
 
